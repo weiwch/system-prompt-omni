@@ -200,3 +200,18 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+   COPYRIGHT AND ATTRIBUTION NOTICE
+
+   pi-system-prompt
+   Copyright 2026 Alex (jandrikus) and pi-system-prompt contributors
+   https://github.com/jandrikus/pi-system-prompt
+
+   system-prompt-omni modifications
+   Copyright 2026 weiwch
+   https://github.com/weiwch/system-prompt-omni
+
+   system-prompt-omni is a modified fork of pi-system-prompt. Modifications
+   include prompt-source export, effective system-prompt session recording,
+   tests, documentation, and compatibility updates. The Apache License,
+   Version 2.0 above applies to the original work and this fork.
