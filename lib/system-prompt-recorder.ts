@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 
 export const SYSTEM_PROMPT_ENTRY_TYPE = "pi-system-prompt";
-export const SYSTEM_PROMPT_ENTRY_SCHEMA_VERSION = 1;
+export const SYSTEM_PROMPT_ENTRY_SCHEMA_VERSION = 2;
+
+export interface SystemPromptSnapshotHashes {
+  systemPromptSha256?: string;
+  serializedToolsSha256?: string;
+  capturesSerializedTools: boolean;
+}
 
 interface CustomEntryLike {
   type?: unknown;
@@ -19,6 +25,45 @@ function jsonSnapshot(value: unknown): unknown {
   } catch {
     return "[unserializable provider system instruction]";
   }
+}
+
+function valueAtPath(root: Record<string, unknown>, path: readonly string[]): unknown {
+  let value: unknown = root;
+  for (const segment of path) {
+    if (!isRecord(value) || !Object.prototype.hasOwnProperty.call(value, segment)) {
+      return undefined;
+    }
+    value = value[segment];
+  }
+  return value;
+}
+
+/**
+ * Serialize the tool definitions from Pi's final provider payload without
+ * rebuilding, sorting, or normalizing them. The paths cover Pi's current
+ * provider transports, including OpenAI, Anthropic, Google, Bedrock, and the
+ * pi-messages API.
+ */
+export function extractSerializedTools(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined;
+
+  const toolPaths = [
+    ["tools"],
+    ["config", "tools"],
+    ["toolConfig", "tools"],
+    ["context", "tools"],
+    ["body", "tools"],
+    ["body", "config", "tools"],
+    ["body", "toolConfig", "tools"],
+    ["body", "context", "tools"],
+  ] as const;
+
+  for (const path of toolPaths) {
+    const tools = valueAtPath(payload, path);
+    if (tools === undefined) continue;
+    return JSON.stringify(tools);
+  }
+  return undefined;
 }
 
 function pushField(
@@ -106,6 +151,34 @@ export function latestSystemPromptSha256(entries: readonly CustomEntryLike[]): s
     if (typeof entry.data.systemPrompt === "string") {
       return sha256(entry.data.systemPrompt);
     }
+  }
+  return undefined;
+}
+
+/** Return the hashes from the newest recorder snapshot on the active branch. */
+export function latestSystemPromptSnapshotHashes(
+  entries: readonly CustomEntryLike[],
+): SystemPromptSnapshotHashes | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.type !== "custom" || entry.customType !== SYSTEM_PROMPT_ENTRY_TYPE) continue;
+    if (!isRecord(entry.data)) continue;
+
+    const systemPromptSha256 =
+      typeof entry.data.systemPromptSha256 === "string"
+        ? entry.data.systemPromptSha256
+        : typeof entry.data.systemPrompt === "string"
+          ? sha256(entry.data.systemPrompt)
+          : undefined;
+    const serializedToolsSha256 =
+      typeof entry.data.serializedTools === "string"
+        ? sha256(entry.data.serializedTools)
+        : undefined;
+    const capturesSerializedTools =
+      typeof entry.data.schemaVersion === "number" &&
+      entry.data.schemaVersion >= SYSTEM_PROMPT_ENTRY_SCHEMA_VERSION;
+
+    return { systemPromptSha256, serializedToolsSha256, capturesSerializedTools };
   }
   return undefined;
 }

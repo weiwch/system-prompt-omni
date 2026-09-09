@@ -1,6 +1,6 @@
 {
   "name": "system-prompt-omni",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Display, export, and record the effective pi coding agent system prompt",
   "keywords": ["pi-package", "pi-extension", "system-prompt", "debugging", "recorder"],

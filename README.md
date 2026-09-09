@@ -46,18 +46,35 @@ confirmation. Run `/reload` after exporting to load the new file.
 
 ## Prompt recording
 
-Before each provider request, the package compares the SHA-256 hash of the effective system
-prompt with the latest snapshot on the active session branch. When it changes, a durable custom
-session entry with type `pi-system-prompt` records:
+Before each provider request, the package compares the SHA-256 hashes of the effective system
+prompt and serialized active tool definitions with the latest snapshot on the active session
+branch. When either changes, a durable custom session entry with type `pi-system-prompt` records:
 
 - the full effective system prompt, its hash, and UTF-8 byte length;
 - provider, model, API, and thinking-level metadata;
-- active tool names and definitions; and
+- `serializedTools`, the tool-definition value copied from Pi's final provider payload and
+  encoded as a compact JSON string; and
 - provider-level system/developer instructions extracted from the serialized request.
 
+No second tool representation is stored. Tool definitions are not rebuilt or sorted, so array
+order and provider-specific structure stay identical to the `before_provider_request` payload.
+For OpenAI Chat Completions, for example, the value has the same shape as
+`current_harness_tools.json`:
+
+```json
+{
+  "serializedTools": "[{\"type\":\"function\",\"function\":{\"name\":\"read\",\"description\":\"Read files\",\"parameters\":{\"type\":\"object\"}}}]"
+}
+```
+
+The exact representation follows the active API. OpenAI Responses, Anthropic, Google, Bedrock,
+and `pi-messages` therefore retain their own transmitted tool schema rather than being converted
+to the Chat Completions shape. Load this package after extensions that rewrite provider requests
+so it observes their final tool order and definitions.
+
 The recorder never stores the complete provider payload, never adds its custom entries to the
-LLM context, and returns the payload unchanged. Load this package after extensions that rewrite
-provider requests if you want those rewritten provider instructions included in the snapshot.
+LLM context, and returns the payload unchanged. Loading it last also ensures rewritten provider
+instructions are included in the snapshot.
 
 ## Install
 

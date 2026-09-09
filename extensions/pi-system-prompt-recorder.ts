@@ -1,5 +1,5 @@
 /**
- * Persist the effective system prompt when it changes.
+ * Persist the effective system prompt or provider tool definitions when either changes.
  *
  * Custom entries are durable but are not added to the LLM context. Load this
  * extension last if another extension rewrites the serialized provider payload
@@ -8,8 +8,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import {
+  extractSerializedTools,
   extractProviderSystemInstructions,
-  latestSystemPromptSha256,
+  latestSystemPromptSnapshotHashes,
   sha256,
   SYSTEM_PROMPT_ENTRY_SCHEMA_VERSION,
   SYSTEM_PROMPT_ENTRY_TYPE,
@@ -19,22 +20,24 @@ export default function systemPromptRecorder(pi: ExtensionAPI): void {
   pi.on("before_provider_request", (event, ctx) => {
     const systemPrompt = ctx.getSystemPrompt();
     const systemPromptSha256 = sha256(systemPrompt);
+    const serializedTools = extractSerializedTools(event.payload);
+    const serializedToolsSha256 =
+      serializedTools === undefined ? undefined : sha256(serializedTools);
 
-    // Compare with the latest snapshot on the active branch. This also avoids
-    // duplicates after process restarts, session resume, and extension reloads.
-    if (latestSystemPromptSha256(ctx.sessionManager.getBranch()) === systemPromptSha256) {
+    // Compare both prompt and tool definitions with the latest snapshot on the
+    // active branch. This also avoids duplicates after process restarts,
+    // session resume, and extension reloads.
+    const latestHashes = latestSystemPromptSnapshotHashes(ctx.sessionManager.getBranch());
+    if (
+      latestHashes?.systemPromptSha256 === systemPromptSha256 &&
+      latestHashes.capturesSerializedTools &&
+      latestHashes.serializedToolsSha256 === serializedToolsSha256
+    ) {
       return undefined;
     }
 
     const providerSystemInstructions = extractProviderSystemInstructions(event.payload);
     const model = ctx.model;
-    const activeTools = pi.getActiveTools();
-    const toolsByName = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
-    const tools = activeTools.flatMap((name) => {
-      const tool = toolsByName.get(name);
-      if (!tool) return [];
-      return [{ name: tool.name, description: tool.description, parameters: tool.parameters }];
-    });
 
     pi.appendEntry(SYSTEM_PROMPT_ENTRY_TYPE, {
       schemaVersion: SYSTEM_PROMPT_ENTRY_SCHEMA_VERSION,
@@ -47,8 +50,7 @@ export default function systemPromptRecorder(pi: ExtensionAPI): void {
       modelId: model?.id,
       api: model?.api,
       thinkingLevel: pi.getThinkingLevel(),
-      activeTools,
-      tools,
+      ...(serializedTools === undefined ? {} : { serializedTools }),
       providerSystemInstructions,
     });
 
