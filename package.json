@@ -7,7 +7,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/weiwch/system-prompt-omni"
+    "url": "git+https://github.com/weiwch/system-prompt-omni.git"
   },
   "homepage": "https://github.com/weiwch/system-prompt-omni#readme",
   "bugs": {

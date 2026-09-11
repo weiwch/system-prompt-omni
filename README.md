@@ -58,8 +58,6 @@ branch. When either changes, a durable custom session entry with type `pi-system
 
 No second tool representation is stored. Tool definitions are not rebuilt or sorted, so array
 order and provider-specific structure stay identical to the `before_provider_request` payload.
-For OpenAI Chat Completions, for example, the value has the same shape as
-`current_harness_tools.json`:
 
 ```json
 {
@@ -93,6 +91,24 @@ pi install /path/to/system-prompt-omni
 ```bash
 npm test
 ```
+
+## Release
+
+Keep the version in `package.json` and the Git tag in sync, then push the tag:
+
+```bash
+git tag v0.4.0
+git push origin v0.4.0
+```
+
+The release workflow tests and publishes the package to npm before creating the matching GitHub
+Release. Prerelease versions (for example, `v0.4.0-beta.1`) use npm's `next` tag and create a
+GitHub prerelease. The workflow can also be run manually with an existing tag to safely repair a
+partial release.
+
+Publishing uses npm Trusted Publishing (OIDC), so the npm package must trust the GitHub repository
+`weiwch/system-prompt-omni` and workflow filename `publish.yml`, with direct publishing allowed.
+No long-lived npm token is required.
 
 ## License
 
