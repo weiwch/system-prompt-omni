@@ -1,9 +1,9 @@
 {
   "name": "system-prompt-omni",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "type": "module",
-  "description": "Display, export, and record the effective pi coding agent system prompt",
-  "keywords": ["pi-package", "pi-extension", "system-prompt", "debugging", "recorder"],
+  "description": "Display and export the effective pi coding agent system prompt",
+  "keywords": ["pi-package", "pi-extension", "system-prompt", "debugging", "export"],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -18,8 +18,8 @@
     "test": "node --test test/*.test.ts"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-coding-agent": ">=0.86.0",
+    "@earendil-works/pi-tui": ">=0.86.0"
   },
   "pi": {
     "extensions": ["./extensions"]

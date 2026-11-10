@@ -1,4 +1,5 @@
 export type PromptFileKind = "system" | "append";
+export type SkillReadTool = "read" | "bash" | "indirect";
 
 export interface PromptContextFile {
   path: string;
@@ -14,101 +15,122 @@ export interface PromptSkill {
 
 export interface PromptBuildOptions {
   customPrompt?: string;
+  forceSystemPrompt?: string;
   selectedTools?: string[];
+  hiddenTools?: string[];
   appendSystemPrompt?: string;
+  sections?: Record<string, string>;
   cwd: string;
   contextFiles?: PromptContextFile[];
   skills?: PromptSkill[];
 }
 
+/** Render the configured skills with Pi's public formatSkillsForPrompt helper. */
+export type SkillPromptFormatter = (reader: SkillReadTool) => string;
+
 /**
- * Return content that is safe to persist as one of Pi's prompt source files.
- * SYSTEM.md contains only the custom/default prefix; Pi will append dynamic
- * context, skills, and cwd again when it loads the file.
+ * Export prompt source, excluding the dynamic sections Pi adds when loading it.
+ * The native skill formatter is supplied by the extension so this helper does
+ * not duplicate version-dependent skill instructions or require Pi in tests.
  */
 export function getPromptFileContent(
   kind: PromptFileKind,
   systemPrompt: string,
   options: PromptBuildOptions,
+  formatSkills?: SkillPromptFormatter,
 ): string {
   if (kind === "append") {
     return options.appendSystemPrompt ?? "";
   }
 
-  // Pi treats a truthy customPrompt as the complete SYSTEM.md/template prefix.
+  // A known source file is safe to export even if a per-turn prompt is active.
   if (options.customPrompt) {
     return options.customPrompt;
   }
 
-  const dynamicSuffix = buildDynamicSuffix(options);
-  if (!systemPrompt.endsWith(dynamicSuffix)) {
-    throw new Error(
-      "The current prompt does not match Pi's base prompt layout. " +
-        "A per-turn extension may have changed it; refusing to export dynamic context into SYSTEM.md.",
-    );
+  if (options.forceSystemPrompt !== undefined) {
+    throw unsafeExport("A forced system prompt has no separable base prefix.");
   }
 
-  return systemPrompt.slice(0, -dynamicSuffix.length);
+  const dynamicSuffix = buildDynamicSuffix(options, formatSkills);
+  if (!systemPrompt.endsWith(dynamicSuffix)) {
+    throw unsafeExport("The current prompt does not match Pi's base prompt layout.");
+  }
+
+  const prefix = systemPrompt.slice(0, -dynamicSuffix.length);
+  if (!prefix.trim()) {
+    throw unsafeExport("The current prompt has no base prefix.");
+  }
+  // getSystemPromptOptions() describes the base inputs. A per-turn extension
+  // can add a dynamic section before cwd without changing that expected suffix.
+  // Such a section must not be mistaken for part of the reusable source.
+  if (/^<(?:addendum|project_context|skills|cwd)>\r?$/m.test(prefix)) {
+    throw unsafeExport("The remaining prefix contains per-turn dynamic sections.");
+  }
+  return prefix;
 }
 
-function buildDynamicSuffix(options: PromptBuildOptions): string {
-  let suffix = "";
+function unsafeExport(reason: string): Error {
+  return new Error(`${reason} Refusing to export dynamic context into SYSTEM.md.`);
+}
+
+function buildDynamicSuffix(
+  options: PromptBuildOptions,
+  formatSkills?: SkillPromptFormatter,
+): string {
+  // Map preserves the native section order when a custom section replaces an
+  // existing one, and appends newly introduced sections after cwd.
+  const sections = new Map<string, string>();
 
   if (options.appendSystemPrompt) {
-    suffix += `\n\n${options.appendSystemPrompt}`;
+    sections.set("addendum", options.appendSystemPrompt);
   }
 
   const contextFiles = options.contextFiles ?? [];
   if (contextFiles.length > 0) {
-    suffix += "\n\n<project_context>\n\n";
-    suffix += "Project-specific instructions and guidelines:\n\n";
-    for (const contextFile of contextFiles) {
-      suffix += `<project_instructions path="${contextFile.path}">\n`;
-      suffix += `${contextFile.content}\n`;
-      suffix += "</project_instructions>\n\n";
+    sections.set(
+      "project_context",
+      [
+        "Project-specific instructions and guidelines:",
+        ...contextFiles.map(
+          ({ path, content }) =>
+            `<project_instructions path="${path}">\n${content}\n</project_instructions>`,
+        ),
+      ].join("\n\n"),
+    );
+  }
+
+  const selectedTools = options.selectedTools ?? ["read", "bash", "edit", "write"];
+  const declaredTools = selectedTools.filter((name) => !options.hiddenTools?.includes(name));
+  const readers = ["read", "bash"] as const;
+  const reader =
+    readers.find((name) => declaredTools.includes(name)) ??
+    (readers.some((name) => selectedTools.includes(name)) ? "indirect" : undefined);
+
+  if (reader && (options.skills?.length ?? 0) > 0) {
+    if (!formatSkills) {
+      throw unsafeExport("Pi's skill formatter is required for the configured skills.");
     }
-    suffix += "</project_context>\n";
+    const skills = formatSkills(reader).trim();
+    if (skills) {
+      sections.set("skills", skills);
+    }
   }
 
-  const hasReadTool = !options.selectedTools || options.selectedTools.includes("read");
-  if (hasReadTool) {
-    suffix += formatSkills(options.skills ?? []);
+  sections.set("cwd", options.cwd.replace(/\\/g, "/"));
+
+  for (const [name, content] of Object.entries(options.sections ?? {})) {
+    if (!/^[a-z][a-z0-9_-]*$/.test(name) || name === "preamble") {
+      throw unsafeExport(`Invalid system prompt section name: ${name}.`);
+    }
+    if (!content) continue;
+    if (["tools", "rules", "docs"].includes(name)) {
+      throw unsafeExport(`The custom ${name} section replaces part of the base prefix.`);
+    }
+    sections.set(name, content);
   }
 
-  suffix += `\nCurrent working directory: ${options.cwd.replace(/\\/g, "/")}`;
-  return suffix;
-}
-
-function formatSkills(skills: PromptSkill[]): string {
-  const visibleSkills = skills.filter((skill) => !skill.disableModelInvocation);
-  if (visibleSkills.length === 0) {
-    return "";
-  }
-
-  const lines = [
-    "\n\nThe following skills provide specialized instructions for specific tasks.",
-    "Use the read tool to load a skill's file when the task matches its description.",
-    "When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
-    "",
-    "<available_skills>",
-  ];
-
-  for (const skill of visibleSkills) {
-    lines.push("  <skill>");
-    lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-    lines.push(`    <description>${escapeXml(skill.description)}</description>`);
-    lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
-    lines.push("  </skill>");
-  }
-  lines.push("</available_skills>");
-  return lines.join("\n");
-}
-
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+  return [...sections]
+    .map(([name, content]) => `\n\n<${name}>\n${content}\n</${name}>`)
+    .join("");
 }

@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 
 import {
   CONFIG_DIR_NAME,
+  formatSkillsForPrompt,
   getAgentDir,
   type ExtensionAPI,
   type ExtensionCommandContext,
@@ -234,7 +235,13 @@ async function exportPromptFile(
 
   let content: string;
   try {
-    content = getPromptFileContent(kind, ctx.getSystemPrompt(), ctx.getSystemPromptOptions());
+    const options = ctx.getSystemPromptOptions();
+    content = getPromptFileContent(
+      kind,
+      ctx.getSystemPrompt(),
+      options,
+      (reader) => formatSkillsForPrompt(options.skills ?? [], reader),
+    );
   } catch (error) {
     ctx.ui.notify(`Could not export ${fileNameForKind(kind)}: ${formatError(error)}`, "error");
     return;

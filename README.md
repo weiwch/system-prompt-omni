@@ -3,7 +3,32 @@
 Display the full [pi coding agent](https://pi.dev) system prompt — with all injected tools,
 guidelines, context files, and skills — in a scrollable full-screen overlay. The extension can
 also export safe `SYSTEM.md` and `APPEND_SYSTEM.md` source files globally or for the current
-project, and records each changed effective prompt in the current session.
+project. System-prompt and tool history is now recorded natively by pi.
+
+## Update
+
+### v0.4.0 — Proudly retiring the custom recorder
+
+**Mission accomplished! Since [pi v0.86.0](https://github.com/earendil-works/pi/releases/tag/v0.86.0),
+pi itself provides the system-prompt and tool-history recording that this plugin originally
+added. We're proud to retire our custom recorder and let pi handle session history.**
+
+Native support arrived in [pi PR #9548](https://github.com/earendil-works/pi/pull/9548). Pi writes
+system messages with prompt `sections` and `toolsAdded` / `toolsRemoved` directly into session
+JSONL, preserving changes across resume and branch navigation.
+
+This release removes the `before_provider_request` recorder, its helpers and tests, and stops
+writing `pi-system-prompt` custom entries. The full-screen viewer, clipboard copying,
+and prompt-file exports remain available. `SYSTEM.md` export also understands pi's structured
+prompt layout, including `<cwd>` and dynamically injected sections.
+
+**Compatibility:** v0.4.0 requires pi **v0.86.0 or later**. The old recorder remains in plugin
+v0.3.2 for users who still need it. Existing `pi-system-prompt` entries are left in session
+history; this update does not rewrite or delete them.
+
+Native history records pi's structured prompt sections and tool declarations. It is not an
+exact copy of the final provider request: this plugin no longer captures provider-specific
+`serializedTools`, `providerSystemInstructions`, or request-only prompt rewrites.
 
 ## Usage
 
@@ -36,43 +61,55 @@ The export wizard writes to one of these locations:
 
 `SYSTEM.md` export is intentionally safe: if a custom prompt is already configured, its source
 text is exported. Otherwise, the extension removes dynamically injected append text, project
-context, skills, and current working directory from the assembled prompt before writing the
-static default prefix. Pi will inject those dynamic sections again when it loads the exported
-file.
+context, skills, current working directory, and custom sections from the assembled prompt before
+writing the default prefix, including its tools, rules, and documentation sections. Pi will
+inject the dynamic sections again when it loads the exported file. If the expected layout cannot
+be verified, the export stops instead of copying dynamic context into `SYSTEM.md`.
 
 `APPEND_SYSTEM.md` export writes the currently configured append text. If none is configured,
 the wizard can create an empty starter file. Existing files are never overwritten without
 confirmation. Run `/reload` after exporting to load the new file.
 
-## Prompt recording
+## Native prompt history
 
-Before each provider request, the package compares the SHA-256 hashes of the effective system
-prompt and serialized active tool definitions with the latest snapshot on the active session
-branch. When either changes, a durable custom session entry with type `pi-system-prompt` records:
-
-- the full effective system prompt, its hash, and UTF-8 byte length;
-- provider, model, API, and thinking-level metadata;
-- `serializedTools`, the tool-definition value copied from Pi's final provider payload and
-  encoded as a compact JSON string; and
-- provider-level system/developer instructions extracted from the serialized request.
-
-No second tool representation is stored. Tool definitions are not rebuilt or sorted, so array
-order and provider-specific structure stay identical to the `before_provider_request` payload.
+Pi records prompt and tool history automatically; no recorder extension or special load order
+is needed. The first model request stores the prompt sections and tool declarations in a normal
+session message. A simplified entry looks like this:
 
 ```json
 {
-  "serializedTools": "[{\"type\":\"function\",\"function\":{\"name\":\"read\",\"description\":\"Read files\",\"parameters\":{\"type\":\"object\"}}}]"
+  "type": "message",
+  "message": {
+    "role": "system",
+    "content": "",
+    "sections": {
+      "preamble": "You are a coding assistant...",
+      "cwd": "<cwd>\n/project\n</cwd>"
+    },
+    "toolsAdded": [
+      {
+        "name": "read",
+        "description": "Read files",
+        "parameters": {
+          "type": "object",
+          "properties": { "path": { "type": "string" } },
+          "required": ["path"]
+        }
+      }
+    ]
+  }
 }
 ```
 
-The exact representation follows the active API. OpenAI Responses, Anthropic, Google, Bedrock,
-and `pi-messages` therefore retain their own transmitted tool schema rather than being converted
-to the Chat Completions shape. Load this package after extensions that rewrite provider requests
-so it observes their final tool order and definitions.
+Later entries contain only changes: `sections` patches the named sections (`null` removes a
+section), while `toolsAdded` and `toolsRemoved` update the tool declarations. To reconstruct the
+current state, replay these changes along the active session branch rather than treating every
+system message as a complete snapshot. Pi also carries a system-message checkpoint through
+compaction.
 
-The recorder never stores the complete provider payload, never adds its custom entries to the
-LLM context, and returns the payload unchanged. Loading it last also ensures rewritten provider
-instructions are included in the snapshot.
+See pi's [session format documentation](https://github.com/earendil-works/pi/blob/v0.86.0/packages/coding-agent/docs/session-format.md#sessionmessageentry)
+for the native schema. Consumers of the old `pi-system-prompt` custom entries should migrate to
+this format; native history does not expose the old provider-specific snapshot fields.
 
 ## Install
 

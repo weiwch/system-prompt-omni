@@ -212,6 +212,8 @@
    https://github.com/weiwch/system-prompt-omni
 
    system-prompt-omni is a modified fork of pi-system-prompt. Modifications
-   include prompt-source export, effective system-prompt session recording,
-   tests, documentation, and compatibility updates. The Apache License,
-   Version 2.0 above applies to the original work and this fork.
+   include prompt-source export, tests, documentation, and compatibility
+   updates. Earlier versions also included effective system-prompt session
+   recording, retired in v0.4.0 in favor of pi's native session history.
+   The Apache License, Version 2.0 above applies to the original work and
+   this fork.
