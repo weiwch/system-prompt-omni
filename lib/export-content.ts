@@ -18,11 +18,22 @@ export interface PromptBuildOptions {
   forceSystemPrompt?: string;
   selectedTools?: string[];
   hiddenTools?: string[];
+  toolSnippets?: Record<string, string>;
+  toolGuidelines?: Record<string, string[]>;
+  promptGuidelines?: string[];
   appendSystemPrompt?: string;
   sections?: Record<string, string>;
   cwd: string;
   contextFiles?: PromptContextFile[];
   skills?: PromptSkill[];
+}
+
+/** Native Pi version and documentation paths, supplied by public config helpers. */
+export interface PiDocumentationPaths {
+  version: string;
+  readme: string;
+  docs: string;
+  examples: string;
 }
 
 /** Render the configured skills with Pi's public formatSkillsForPrompt helper. */
@@ -38,6 +49,7 @@ export function getPromptFileContent(
   systemPrompt: string,
   options: PromptBuildOptions,
   formatSkills?: SkillPromptFormatter,
+  documentationPaths?: PiDocumentationPaths,
 ): string {
   if (kind === "append") {
     return options.appendSystemPrompt ?? "";
@@ -50,6 +62,20 @@ export function getPromptFileContent(
 
   if (options.forceSystemPrompt !== undefined) {
     throw unsafeExport("A forced system prompt has no separable base prefix.");
+  }
+
+  // Pi v1.5.2 may show a per-turn modified prompt, while these options describe
+  // the reusable base source. Reconstruct only native static sections.
+  if (documentationPaths?.version === "1.5.2") {
+    for (const [name, content] of Object.entries(options.sections ?? {})) {
+      if (!/^[a-z][a-z0-9_-]*$/.test(name) || name === "preamble") {
+        throw unsafeExport(`Invalid system prompt section name: ${name}.`);
+      }
+      if (content && ["tools", "rules", "docs"].includes(name)) {
+        throw unsafeExport(`The custom ${name} section replaces part of the base prefix.`);
+      }
+    }
+    return buildPiV152BasePrompt(options, documentationPaths);
   }
 
   const dynamicSuffix = buildDynamicSuffix(options, formatSkills);
@@ -68,6 +94,73 @@ export function getPromptFileContent(
     throw unsafeExport("The remaining prefix contains per-turn dynamic sections.");
   }
   return prefix;
+}
+
+const PI_V152_PREAMBLE = "You are a coding assistant running inside pi, a coding agent harness. Help users inspect files, run commands, and modify code.";
+
+/** Reconstruct Pi v1.5.2's native static base, excluding all dynamic sections. */
+function buildPiV152BasePrompt(options: PromptBuildOptions, paths: PiDocumentationPaths): string {
+  const selectedTools = options.selectedTools ?? ["read", "bash", "edit", "write"];
+  const declaredTools = selectedTools.filter((name) => !options.hiddenTools?.includes(name));
+  const snippets = options.toolSnippets ?? {};
+  const visibleTools = declaredTools.filter((name) => !!snippets[name]);
+  const tools = visibleTools.length > 0
+    ? visibleTools.map((name) => `- ${name}: ${snippets[name]}`).join("\n")
+    : "(none)";
+  const toolSection = `${tools}\n\nAdditional tools may be available.`;
+  const ruleSection = buildPiV152Rules(declaredTools, options.toolGuidelines ?? {}, options.promptGuidelines ?? []);
+  const docsSection = `Pi documentation (read only when the user asks about the harness itself, its SDK, extensions, themes, skills, or TUI):
+- Main documentation: ${paths.readme}
+- Additional docs: ${paths.docs}
+- Examples: ${paths.examples} (extensions, custom tools, SDK)
+- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
+- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), packages (docs/packages.md), environment variables (docs/environment-variables.md), MCP servers (docs/mcp.md), codemode scripts and non-LLM models such as classifiers and image models (docs/codemode.md)
+- Before implementing harness changes, read the relevant docs and examples in full, following related cross-references.`;
+  return [
+    PI_V152_PREAMBLE,
+    `<tools>\n${toolSection}\n</tools>`,
+    `<rules>\n${ruleSection}\n</rules>`,
+    `<docs>\n${docsSection}\n</docs>`,
+  ].join("\n\n");
+}
+
+function buildPiV152Rules(
+	selectedTools: string[],
+	toolGuidelines: Record<string, string[]>,
+	promptGuidelines: string[],
+): string {
+	const rules: string[] = [];
+	const seen = new Set<string>();
+	const addRule = (rule: string): void => {
+		const normalized = rule.trim();
+		if (!normalized || seen.has(normalized)) return;
+		seen.add(normalized);
+		rules.push(normalized);
+	};
+
+	const hasBash = selectedTools.includes("bash");
+	const hasPowerShell = selectedTools.includes("powershell");
+	const hasGrep = selectedTools.includes("grep");
+	const hasFind = selectedTools.includes("find");
+	const hasLs = selectedTools.includes("ls");
+
+	if ((hasBash || hasPowerShell) && !hasGrep && !hasFind && !hasLs) {
+		if (hasBash && hasPowerShell) {
+			addRule("Use bash or PowerShell for file operations like listing, searching, and finding files");
+		} else if (hasPowerShell) {
+			addRule("Use PowerShell for file operations like listing, searching, and finding files");
+		} else {
+			addRule("Use bash for file operations like ls, rg, find");
+		}
+	}
+
+	for (const name of selectedTools) {
+		for (const rule of toolGuidelines[name] ?? []) addRule(rule);
+	}
+	for (const rule of promptGuidelines) addRule(rule);
+	addRule("Be concise in your responses");
+	addRule("Show file paths clearly when working with files");
+	return rules.map((rule) => `- ${rule}`).join("\n");
 }
 
 function unsafeExport(reason: string): Error {
