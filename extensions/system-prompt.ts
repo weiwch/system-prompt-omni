@@ -9,8 +9,12 @@ import { dirname, join } from "node:path";
 
 import {
   CONFIG_DIR_NAME,
+  VERSION,
   formatSkillsForPrompt,
   getAgentDir,
+  getDocsPath,
+  getExamplesPath,
+  getReadmePath,
   type ExtensionAPI,
   type ExtensionCommandContext,
   type Theme,
@@ -241,6 +245,7 @@ async function exportPromptFile(
       ctx.getSystemPrompt(),
       options,
       (reader) => formatSkillsForPrompt(options.skills ?? [], reader),
+      { version: VERSION, readme: getReadmePath(), docs: getDocsPath(), examples: getExamplesPath() },
     );
   } catch (error) {
     ctx.ui.notify(`Could not export ${fileNameForKind(kind)}: ${formatError(error)}`, "error");

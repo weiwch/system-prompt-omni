@@ -66,6 +66,13 @@ writing the default prefix, including its tools, rules, and documentation sectio
 inject the dynamic sections again when it loads the exported file. If the expected layout cannot
 be verified, the export stops instead of copying dynamic context into `SYSTEM.md`.
 
+On **pi v1.5.2**, the extension reconstructs the default static `SYSTEM.md` source
+from the original base prompt options instead of slicing the current effective
+prompt. This remains safe if per-turn extensions change the effective prompt’s
+suffix, tools, rules or preamble: temporary content is not saved.
+Base overrides of the native `tools`, `rules`, or `docs` still fail closed;
+other Pi versions retain the conservative suffix-layout validation.
+
 `APPEND_SYSTEM.md` export writes the currently configured append text. If none is configured,
 the wizard can create an empty starter file. Existing files are never overwritten without
 confirmation. Run `/reload` after exporting to load the new file.
